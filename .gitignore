@@ -1,0 +1,17 @@
+.dub
+docs.json
+__dummy.html
+docs/
+/dredis-cli
+dredis-cli.so
+dredis-cli.dylib
+dredis-cli.dll
+libdredis-cli.a
+dredis-cli.a
+dredis-cli.lib
+dredis-cli-test-*
+*.exe
+*.pdb
+*.o
+*.obj
+*.lst
