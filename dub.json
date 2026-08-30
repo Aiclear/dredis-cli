@@ -1,9 +1,12 @@
 {
 	"description": "A minimal D application.",
-	"license": "MIT",
+	"dependencies": {
+		"boilerplate": "~>1.11.1"
+	},
 	"authors": [
 		"yuxinzhe"
 	],
 	"copyright": "Copyright © 2026, yuxinzhe",
+	"license": "MIT",
 	"name": "dredis-cli"
 }

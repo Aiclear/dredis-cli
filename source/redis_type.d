@@ -8,6 +8,8 @@ import std.conv;
 import std.range : iota;
 import std.bigint;
 
+import boilerplate.autostring;
+
 import byte_buffer;
 
 const string TERMINAL = "\r\n";
@@ -25,12 +27,12 @@ enum RespVersion {
 /** 
  * connect auth info
  */
-class Auth {
-private:
+struct Auth {
+    static const string COMMAND = "AUTH";
+
     string clientName = "dredis-cli";
     string password;
 
-public:
     this(string clientName, string password) {
         this.clientName = clientName;
         this.password = password;
@@ -41,29 +43,35 @@ public:
     }
 }
 
-class Hello {
+struct Hello {
     // command key world
     const string COMMAND = "HELLO";
     // resp protocl version
     RespVersion respVersion = RespVersion.RESP3;
     // AUTH
-    Auth auth;
+    private Nullable!Auth auth_;
 
-    this() {
+    @property void auth(Auth auth) {
+        this.auth_ = Nullable!Auth(auth);
     }
 
     this(Auth auth) {
-        this.auth = auth;
+        this.auth_ = Nullable!Auth(auth);
     }
 
     this(RespVersion respVersion, Auth auth) {
         this.respVersion = respVersion;
-        this.auth = auth;
+        this.auth_ = Nullable!Auth(auth);
     }
 
     ubyte[] encode() {
         auto buffer = new OutBuffer();
-        buffer.write(format("%s %s \r\n", this.COMMAND, this.respVersion));
+        buffer.write(format("%s %s", this.COMMAND, cast(string) this.respVersion));
+        if (!this.auth_.isNull()) {
+            buffer.write(format("%s %s %s", Auth.COMMAND, this.auth_.get()
+                    .clientName, this.auth_.get().password));
+        }
+        buffer.write(TERMINAL);
         return buffer.toBytes();
     }
 }
@@ -75,7 +83,8 @@ class SimpleString : RedisType {
     // simple string first byte
     static const ubyte PLUS = '+';
 
-    private string str;
+    const string str;
+    mixin(GenerateToString);
 
     this(string str) {
         this.str = str;
@@ -90,7 +99,8 @@ class SimpleError : RedisType {
     // simple error first byte
     static const ubyte MINUS = '-';
 
-    string errorMsg;
+    const string errorMsg;
+    mixin(GenerateToString);
 
     this(string errorMsg) {
         this.errorMsg = errorMsg;
@@ -99,6 +109,10 @@ class SimpleError : RedisType {
     static SimpleError decode(ByteBuffer buffer) {
         return new SimpleError(cast(string) simpleTypeDecode(buffer));
     }
+
+    override string toString() const @safe pure nothrow {
+        return this.errorMsg;
+    }
 }
 
 class Integers : RedisType {
@@ -106,6 +120,7 @@ class Integers : RedisType {
     static const ubyte COLON = ':';
 
     const long value;
+    mixin(GenerateToString);
 
     this(long value) {
         this.value = value;
@@ -121,6 +136,7 @@ class BulkStrings : RedisType {
     static const ubyte DOLLAR = '$';
 
     const Nullable!string value;
+    mixin(GenerateToString);
 
     this(string value) {
         if (value is null) {
@@ -159,6 +175,7 @@ class Arrays : RedisType {
     static const ubyte ASTERISK = '*';
 
     const RedisType[] values;
+    mixin(GenerateToString);
 
     this(RedisType[] values) {
         this.values = values;
@@ -183,12 +200,17 @@ class Nulls : RedisType {
         auto _ = simpleTypeDecode(buffer);
         return new Nulls();
     }
+
+    override string toString() const @safe pure nothrow {
+        return "null";
+    }
 }
 
 class Booleans : RedisType {
     static const ubyte OCTOTHORPE = '#';
 
     const bool value;
+    mixin(GenerateToString);
 
     this(bool value) {
         this.value = value;
@@ -208,6 +230,7 @@ class Doubles : RedisType {
     static const ubyte COMMA = ',';
 
     const double value;
+    mixin(GenerateToString);
 
     this(double value) {
         this.value = value;
@@ -230,6 +253,7 @@ class BigNumbers : RedisType {
     static const ubyte LEFT_PARENTHESIS = '(';
 
     const BigInt value;
+    mixin(GenerateToString);
 
     this(BigInt value) {
         this.value = value;
@@ -244,6 +268,7 @@ class BulkErrors : RedisType {
     static const ubyte MARK = '!';
 
     const string value;
+    mixin(GenerateToString);
 
     this(string value) {
         this.value = value;
@@ -263,7 +288,8 @@ class BulkErrors : RedisType {
 class Maps : RedisType {
     static const ubyte PERCENT = '%';
 
-    RedisType[RedisType] value;
+    const RedisType[RedisType] value;
+    mixin(GenerateToString);
 
     this(RedisType[RedisType] value) {
         this.value = value;
@@ -290,8 +316,7 @@ class Maps : RedisType {
         buffer.writeBytes(cast(ubyte[]) "%2\r\n+first\r\n:1\r\n+second\r\n:2\r\n");
         buffer.readByte();
         auto m = Maps.decode(buffer);
-        assert(m.value.length != 0);
-        writeln(m.value);
+        assert(m.value.length == 2);
     }
 }
 
@@ -327,6 +352,8 @@ RedisType decode_(ByteBuffer buffer) {
         return Doubles.decode(buffer);
     case BigNumbers.LEFT_PARENTHESIS:
         return BigNumbers.decode(buffer);
+    case Maps.PERCENT:
+        return Maps.decode(buffer);
     default:
         return null;
     }

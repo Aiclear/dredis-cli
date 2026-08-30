@@ -27,6 +27,27 @@ private:
 
 public:
 
+    static ByteBuffer create(size_t capacity) {
+        return new ByteBuffer(capacity);
+    }
+
+    static ByteBuffer createWith(ubyte[] data) {
+        auto bbuffer = new ByteBuffer();
+        with (bbuffer) {
+            buffer = data;
+            readIndex = 0;
+            writeIndex = data.length;
+            markIndex = -1;
+            capacity = data.length;
+        }
+
+        return bbuffer;
+    }
+
+    private this() {
+
+    }
+
     this(size_t capacity) {
         buffer = new ubyte[capacity];
         this.readIndex = 0;
