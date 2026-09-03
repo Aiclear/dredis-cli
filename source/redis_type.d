@@ -109,10 +109,6 @@ class SimpleError : RedisType {
     static SimpleError decode(ByteBuffer buffer) {
         return new SimpleError(cast(string) simpleTypeDecode(buffer));
     }
-
-    override string toString() const @safe pure nothrow {
-        return this.errorMsg;
-    }
 }
 
 class Integers : RedisType {
@@ -274,6 +270,15 @@ class BulkErrors : RedisType {
         this.value = value;
     }
 
+    override size_t toHash() const @nogc @safe pure nothrow {
+        return hashOf(this.value);
+    }
+
+    override bool opEquals(Object other) const @nogc @safe pure nothrow {
+        auto be = cast(BulkErrors) other;
+        return be && be.value == this.value;
+    }
+
     static BulkErrors decode(ByteBuffer buffer) {
         auto len = to!uint(cast(string) simpleTypeDecode(buffer));
         auto errors = cast(string) buffer.readBytes(len);
@@ -326,14 +331,9 @@ class Maps : RedisType {
 /// Returns: decode的redis类型数据
 RedisType decode_(ByteBuffer buffer) {
     // 可能数据不完整，首先进行数据读取位置的mark
-    auto idByte = buffer.peekByte();
-    if (idByte.isNull) {
-        enforce!Exception("cannot decode empty buffer");
-    } else {
-        buffer.readByte();
-    }
+    auto idByte = buffer.readByte();
 
-    switch (idByte.get) {
+    switch (idByte) {
     case SimpleString.PLUS:
         return SimpleString.decode(buffer);
     case SimpleError.MINUS:

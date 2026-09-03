@@ -1,10 +1,13 @@
 module redis_client;
 
+import std.stdio;
 import std.socket;
 import std.exception;
+import std.conv;
 
 import redis_type;
 import byte_buffer;
+import std.parallelism;
 
 // client default buffer size 2MB
 const size_t DEFAULT_CLIENT_BUFFER_SIZE = 2 * 1024 * 1024;
@@ -13,11 +16,21 @@ class RedisClient {
 
     private XSocket socket;
     private ByteBuffer buffer;
-    private ServerInfo serverInfo;
+    ServerInfo serverInfo;
 
     this(Socket socket) {
         this.socket = new XSocket(socket);
         this.buffer = ByteBuffer.create(DEFAULT_CLIENT_BUFFER_SIZE);
+    }
+
+    void printServerInfo() {
+        writeln(serverInfo);
+    }
+
+    void close() {
+        if (socket !is null) {
+            socket.socket.close();
+        }
     }
 
     static RedisClient connect(string ip, ushort port) {
@@ -30,9 +43,9 @@ class RedisClient {
 }
 
 struct ServerInfo {
-    const string server;
-    const string version_;
-    const string proto;
+    string server;
+    string version_;
+    string proto;
 }
 
 private RedisClient handshake(string ip, ushort port, string password) {
@@ -60,20 +73,32 @@ private RedisClient handshake(string ip, ushort port, string password) {
         enforce!Exception("receive data from server error");
     }
     ByteBuffer tmpBuffer = ByteBuffer.createWith(tmpBuf);
-    auto redisType = decode_(tmpBuffer);
+    auto redisServerInfo = decode_(tmpBuffer);
 
-    debug {
-        import std.stdio : writefln;
-
-        writefln("%s", redisType);
+    ServerInfo serverInfo;
+    if (auto map = cast(Maps) redisServerInfo) {
+        foreach (k, v; map.value) {
+            if (auto bs = cast(BulkStrings) k) {
+                if ("server" == bs.value) {
+                    serverInfo.server = (cast(BulkStrings) v).value.get();
+                } else if ("proto" == bs.value) {
+                    serverInfo.proto = to!string((cast(Integers) v).value);
+                } else if ("version" == bs.value) {
+                    serverInfo.version_ = (cast(BulkStrings) v).value.get();
+                }
+            }
+        }
     }
 
     // init redis client by sever response info
-    return new RedisClient(clientSocket);
+    auto redisClient = new RedisClient(clientSocket);
+    redisClient.serverInfo = serverInfo;
+
+    return redisClient;
 }
 
 class XSocket {
-    private Socket socket;
+    Socket socket;
 
     this(Socket socket) {
         this.socket = socket;
