@@ -40,6 +40,16 @@ class RedisClient {
     static RedisClient connect(string ip, ushort port, string password) {
         return handshake(ip, port, password);
     }
+
+    RedisType execCmd(const string command) {
+        // encode command with resp protoco type
+        redis_type.encode(command, buffer);
+        socket.write(buffer);
+
+        // read response from server
+        socket.read(buffer);
+        return decode_(buffer);
+    }
 }
 
 struct ServerInfo {
@@ -105,10 +115,13 @@ class XSocket {
     }
 
     public void read(ByteBuffer buffer) {
-
+        auto lenBytes = this.socket.receive(buffer.recvBufferSlice());
+        buffer.onRecv(lenBytes);
     }
 
     public void write(ByteBuffer buffer) {
-
+        this.socket.send(buffer.sendBufferSlice());
+        // write data to socket, then compact buffer to free space
+        buffer.compact();
     }
 }

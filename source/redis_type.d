@@ -1,6 +1,6 @@
 module redis_type;
 
-import std.string : format;
+import std.string;
 import std.outbuffer;
 import std.exception : enforce;
 import std.typecons;
@@ -77,6 +77,7 @@ struct Hello {
 }
 
 interface RedisType {
+    void encode(ByteBuffer buffer);
 }
 
 class SimpleString : RedisType {
@@ -88,6 +89,10 @@ class SimpleString : RedisType {
 
     this(string str) {
         this.str = str;
+    }
+
+    override void encode(ByteBuffer buffer) {
+        buffer.writeBytes(cast(ubyte[]) format("%s%s%s", PLUS, this.str, TERMINAL));
     }
 
     static SimpleString decode(ByteBuffer buffer) {
@@ -106,6 +111,10 @@ class SimpleError : RedisType {
         this.errorMsg = errorMsg;
     }
 
+    override void encode(ByteBuffer buffer) {
+        buffer.writeBytes(cast(ubyte[]) format("%s%s%s", MINUS, this.errorMsg, TERMINAL));
+    }
+
     static SimpleError decode(ByteBuffer buffer) {
         return new SimpleError(cast(string) simpleTypeDecode(buffer));
     }
@@ -120,6 +129,10 @@ class Integers : RedisType {
 
     this(long value) {
         this.value = value;
+    }
+
+    override void encode(ByteBuffer buffer) {
+        buffer.writeBytes(cast(ubyte[]) format("%s%s%s", COLON, this.value, TERMINAL));
     }
 
     static Integers decode(ByteBuffer buffer) {
@@ -139,6 +152,15 @@ class BulkStrings : RedisType {
             this.value = Nullable!string();
         } else {
             this.value = Nullable!string(value);
+        }
+    }
+
+    override void encode(ByteBuffer buffer) {
+        if (this.value.isNull()) {
+            buffer.writeBytes(cast(ubyte[]) "$-1\r\n");
+        } else {
+            auto str = this.value.get();
+            buffer.writeBytes(cast(ubyte[]) format("$%s\r\n%s\r\n", str.length, str));
         }
     }
 
@@ -170,11 +192,18 @@ class BulkStrings : RedisType {
 class Arrays : RedisType {
     static const ubyte ASTERISK = '*';
 
-    const RedisType[] values;
+    RedisType[] values;
     mixin(GenerateToString);
 
     this(RedisType[] values) {
         this.values = values;
+    }
+
+    override void encode(ByteBuffer buffer) {
+        buffer.writeBytes(cast(ubyte[]) format("*%s\r\n", this.values.length));
+        foreach (v; this.values) {
+            v.encode(buffer);
+        }
     }
 
     static Arrays decode(ByteBuffer buffer) {
@@ -191,6 +220,10 @@ class Arrays : RedisType {
 
 class Nulls : RedisType {
     static const ubyte UNDERSCORE = '_';
+
+    override void encode(ByteBuffer buffer) {
+        buffer.writeBytes(cast(ubyte[]) format("%s%s%s", UNDERSCORE, "", TERMINAL));
+    }
 
     static Nulls decode(ByteBuffer buffer) {
         auto _ = simpleTypeDecode(buffer);
@@ -220,6 +253,10 @@ class Booleans : RedisType {
             return new Booleans(false);
         }
     }
+
+    override void encode(ByteBuffer buffer) {
+        buffer.writeBytes(cast(ubyte[]) format("%s%s%s", OCTOTHORPE, this.value ? "t" : "f", TERMINAL));
+    }
 }
 
 class Doubles : RedisType {
@@ -234,6 +271,10 @@ class Doubles : RedisType {
 
     static Doubles decode(ByteBuffer buffer) {
         return new Doubles(to!double(cast(string) simpleTypeDecode(buffer)));
+    }
+
+    override void encode(ByteBuffer buffer) {
+        buffer.writeBytes(cast(ubyte[]) format("%s%s%s", COMMA, this.value, TERMINAL));
     }
 
     unittest {
@@ -258,6 +299,10 @@ class BigNumbers : RedisType {
     static BigNumbers decode(ByteBuffer buffer) {
         return new BigNumbers(BigInt(cast(string) simpleTypeDecode(buffer)));
     }
+
+    override void encode(ByteBuffer buffer) {
+        buffer.writeBytes(cast(ubyte[]) format("%s%s%s", LEFT_PARENTHESIS, this.value, TERMINAL));
+    }
 }
 
 class BulkErrors : RedisType {
@@ -268,6 +313,10 @@ class BulkErrors : RedisType {
 
     this(string value) {
         this.value = value;
+    }
+
+    override void encode(ByteBuffer buffer) {
+        buffer.writeBytes(cast(ubyte[]) format("%s%s%s", MARK, this.value, TERMINAL));
     }
 
     override size_t toHash() const @nogc @safe pure nothrow {
@@ -293,11 +342,19 @@ class BulkErrors : RedisType {
 class Maps : RedisType {
     static const ubyte PERCENT = '%';
 
-    const RedisType[RedisType] value;
+    RedisType[RedisType] value;
     mixin(GenerateToString);
 
     this(RedisType[RedisType] value) {
         this.value = value;
+    }
+
+    override void encode(ByteBuffer buffer) {
+        buffer.writeBytes(cast(ubyte[]) format("%s%s\r\n", PERCENT, this.value.length));
+        foreach (k, v; this.value) {
+            k.encode(buffer);
+            v.encode(buffer);
+        }
     }
 
     static Maps decode(ByteBuffer buffer) {
@@ -323,6 +380,14 @@ class Maps : RedisType {
         auto m = Maps.decode(buffer);
         assert(m.value.length == 2);
     }
+}
+
+void encode(immutable string command, ByteBuffer buffer) {
+    RedisType[] commandArr;
+    foreach (c; command.split(" ")) {
+        commandArr ~= new BulkStrings(c);
+    }
+    new Arrays(commandArr).encode(buffer);
 }
 
 /// resp decode entrypoint

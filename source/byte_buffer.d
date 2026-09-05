@@ -1,6 +1,6 @@
 module byte_buffer;
 
-import std.exception : basicExceptionCtors, enforce;
+import std.exception : basicExceptionCtors, enforce, assumeUnique;
 import std.string : format;
 import std.typecons;
 
@@ -98,8 +98,44 @@ public:
         return this.readIndex < this.writeIndex;
     }
 
+    scope ubyte[] recvBufferSlice() {
+        return buffer[this.writeIndex .. $];
+    }
+
+    void onRecv(size_t length) {
+        this.writeIndex += length;
+    }
+
+    scope immutable(ubyte[]) sendBufferSlice() {
+        if (this.writeIndex == 0) {
+            return new ubyte[0];
+        }
+
+        auto nowReadIndex = this.readIndex;
+
+        // write all data
+        this.readIndex = this.writeIndex;
+        return assumeUnique(buffer[nowReadIndex .. this.writeIndex]);
+    }
+
     // other function
     // ===============================
+
+    void compact() {
+        if (this.readIndex == 0) {
+            return;
+        }
+        if (this.readIndex == this.writeIndex) {
+            this.readIndex = 0;
+            this.writeIndex = 0;
+            return;
+        }
+
+        auto remaining = this.writeIndex - this.readIndex;
+        buffer[0 .. remaining] = buffer[this.readIndex .. this.writeIndex];
+        this.readIndex = 0;
+        this.writeIndex = remaining;
+    }
 
     void mark() {
         markIndex = readIndex;
